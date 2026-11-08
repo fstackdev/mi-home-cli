@@ -60,7 +60,7 @@ class Store:
     def load(self) -> dict:
         self.prepare()
         try:
-            fd = os.open(self.path / "session.json", os.O_RDONLY | os.O_NOFOLLOW)
+            fd = os.open(self.path / "session.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except FileNotFoundError:
             raise AuthenticationError("No saved session. Run 'mi-home-cli login' first.") from None
         with os.fdopen(fd) as handle:

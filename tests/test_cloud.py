@@ -14,7 +14,7 @@ def test_upstream_known_nonce_vector():
     # Public protocol vector in mi-home-toolkit, not real credentials.
     assert (
         signed_nonce("9wR21gAtfAyn+KDX1ok/Iw==", "BejIOTLgvecBs9sT")
-        == "zq3TaSr/VwnmvvWwMTAEMAuzxs2gLgP6uFJS7bBtWKo="
+        == "zq3TaSr/VwnmvvWwMTAEMAuzxs2gLgP6uFJS7bBtWKo="  # pragma: allowlist secret - public deterministic test fixture, not credentials
     )
 
 
@@ -44,10 +44,11 @@ def test_crypto_matches_vendored_request_contract():
     )
     assert (
         base64.b64decode(params["data"]).hex()
-        == "1a373ededde7462a8d54f5d39f7187039b7a6be23681298e3ecb501820c864097f77a8eefaa4dcd370781b8186"
+        == "1a373ededde7462a8d54f5d39f7187039b7a6be23681298e3ecb501820c864097f77a8eefaa4dcd370781b8186"  # pragma: allowlist secret - public deterministic test fixture, not credentials
     )
     assert params["signature"] == "IOlgIuruwk9Fq6TAmJM66oqIhwE="
-    assert params["rc4_hash__"] == "NGws1YKBTmi4R9nWtE/IDcYuafA2iAmIJ5BuQA=="
+    public_hash = "NGws1YKBTmi4R9nWtE/IDcYuafA2iAmIJ5BuQA=="  # pragma: allowlist secret
+    assert params["rc4_hash__"] == public_hash
 
 
 def test_v2_devices_merge_and_preserve_legacy_token(session, device):
@@ -130,3 +131,20 @@ def test_large_home_is_not_silently_truncated(session):
     )
     with pytest.raises(ProtocolError, match="truncated"):
         Cloud(http, session).devices("de")
+
+
+def test_unsupported_legacy_endpoint_falls_back_to_v2(session, device):
+    http = FakeHTTP(
+        response({"code": -1, "message": "unsupported legacy endpoint"}),
+        response({"code": 0, "result": {"homelist": [{"id": 1, "uid": 2}]}}),
+        response({"code": 0, "result": {"device_info": [device]}}),
+    )
+    assert Cloud(http, session).devices("de")[0].token == TOKEN
+
+
+def test_empty_null_lists_are_supported(session):
+    http = FakeHTTP(
+        response({"code": 0, "result": {"list": None}}),
+        response({"code": 0, "result": {"homelist": None}}),
+    )
+    assert Cloud(http, session).devices("de") == []

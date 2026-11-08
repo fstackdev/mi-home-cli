@@ -4,6 +4,7 @@ import argparse
 import getpass
 import json
 import sys
+import warnings
 from pathlib import Path
 
 import qrcode
@@ -25,7 +26,14 @@ class Terminal:
         return input().strip()
 
     def secret(self, prompt):
-        return getpass.getpass(prompt)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            try:
+                return getpass.getpass(prompt)
+            except getpass.GetPassWarning:
+                raise MiHomeError(
+                    "Cannot hide input on this terminal. Use an interactive SSH TTY."
+                ) from None
 
     def qr(self, url):
         self.message(
@@ -126,7 +134,13 @@ def run(args, store: Store, ui: Terminal) -> int:
     try:
         cloud = Cloud(http, session)
         # Fail on any region error so scripts never mistake a partial scan for a complete one.
-        found = [device for region in regions for device in cloud.devices(region)]
+        found = []
+        for region in regions:
+            ui.message(f"Reading Xiaomi region {region}...")
+            try:
+                found.extend(cloud.devices(region))
+            except MiHomeError as error:
+                raise MiHomeError(f"Region {region}: {error}") from None
     finally:
         http.close()
     if args.model:

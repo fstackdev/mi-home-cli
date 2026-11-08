@@ -28,7 +28,7 @@ Each POST is a form body, including auth fields, rather than a secret-bearing qu
 string. Requests use verified HTTPS and validate every redirect before following it.
 
 Regions: `cn` uses `api.io.mi.com`; others use `{region}.api.io.mi.com`, under `/app`.
-The CLI reads `/home/device_list` then `/v2/homeroom/gethome` and
+The CLI tries `/home/device_list` (falling back when unsupported), then reads `/v2/homeroom/gethome` and
 `/v2/home/home_device_list` to include home-based devices. Records merge by DID within
 a region, preserving nonempty fields. Cross-region records remain distinguishable.
 

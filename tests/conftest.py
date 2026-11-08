@@ -92,6 +92,6 @@ def device():
         "token": TOKEN,
         "isOnline": True,
         "extra": {"fw_version": "test"},
-        "password": "never-export-this",
+        "password": "never-export-this",  # pragma: allowlist secret - public deterministic test fixture, not credentials
         "latitude": "never-export-this",
     }

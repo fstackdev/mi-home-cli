@@ -16,7 +16,7 @@ from .conftest import SERVICE, FakeHTTP, response
         "https://account.xiaomi.com.evil.invalid/a",
         "https://other.invalid",
         "https://account.xiaomi.com:444/a",
-        "https://name:password@account.xiaomi.com/a",
+        "https://name:password@account.xiaomi.com/a",  # pragma: allowlist secret - public deterministic test fixture, not credentials
         "https://account.xiaomi.com/#fragment",
         "https://account.xiaomi.com:invalid",
         "/relative",

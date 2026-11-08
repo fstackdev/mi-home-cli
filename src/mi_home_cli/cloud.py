@@ -144,10 +144,15 @@ class Cloud:
 
     def devices(self, region: str) -> list[Device]:
         # Legacy endpoint used by both desktop tools; v2 adds home/shared devices.
-        result = self.call(
-            region, "/home/device_list", {"getVirtualModel": False, "getHuamiDevices": 0}
-        )
-        rows = self._rows(result, "list")
+        try:
+            result = self.call(
+                region, "/home/device_list", {"getVirtualModel": False, "getHuamiDevices": 0}
+            )
+            rows = self._rows(result, "list")
+        except RegionError:
+            # The maintained extractor uses v2 only; some accounts reject the legacy route.
+            # Authentication, network and rate-limit errors still propagate immediately.
+            rows = []
         homes = self.call(
             region,
             "/v2/homeroom/gethome",

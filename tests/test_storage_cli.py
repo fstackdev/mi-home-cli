@@ -1,10 +1,11 @@
 import json
 import os
 import stat
+import warnings
 
 import pytest
 
-from mi_home_cli.cli import main
+from mi_home_cli.cli import Terminal, main
 from mi_home_cli.cloud import Device
 from mi_home_cli.errors import RateLimitError, StorageError
 from mi_home_cli.storage import Store, write_private
@@ -172,3 +173,32 @@ def test_exception_text_is_not_exposed(monkeypatch, capsys):
     assert main(["devices", "list"]) == 1
     captured = capsys.readouterr()
     assert TOKEN not in captured.err + captured.out
+
+
+def test_password_does_not_fall_back_to_echo(monkeypatch):
+    import getpass
+
+    from mi_home_cli.errors import MiHomeError
+
+    def fallback(prompt):
+        warnings.warn("Could not hide password", getpass.GetPassWarning, stacklevel=1)
+        pytest.fail("password fallback was allowed")
+
+    monkeypatch.setattr(getpass, "getpass", fallback)
+    with pytest.raises(MiHomeError, match="Cannot hide"):
+        Terminal().secret("Password: ")
+
+
+def test_fifo_session_refused_without_blocking(store):
+    store.prepare()
+    os.mkfifo(store.path / "session.json", mode=0o600)
+    with pytest.raises(StorageError):
+        store.load()
+
+
+def test_terminal_qr_renders_headlessly(capsys):
+    Terminal().qr("https://account.xiaomi.com/test-qr")
+    output = capsys.readouterr().err
+    assert "Scan with Xiaomi Home" in output
+    assert "https://account.xiaomi.com/test-qr" not in output
+    assert len(output.splitlines()) > 10

@@ -139,12 +139,13 @@ python3 -m venv .venv
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
 .venv/bin/bandit -q -r src
+.venv/bin/detect-secrets scan --no-verify
 .venv/bin/pip-audit
 .venv/bin/python -m build
 ```
 
 CI runs offline account-free tests on Python 3.11–3.14, lint, Bandit, dependency
-auditing and a secret scan. Tests block accidental live network calls. See
+auditing and a tracked-file secret scan. Tests block accidental live network calls. See
 [research](docs/research.md) for provenance and licensing, and
 [validation](docs/validation.md) for what has actually been tested.
 
