@@ -154,5 +154,5 @@ IP. QR and password/2FA flows are mock-tested; **a successful live account login
 device retrieval must be confirmed by the user on the Pi**. Some device types return
 no miIO token. Accounts over 300 homes or homes over 200 devices fail explicitly rather
 than silently producing a truncated list. This MVP does not implement pagination for
-those very large accounts. A Xiaomi legacy/v2 API failure fails discovery rather than
-claiming an incomplete list is complete.
+those very large accounts. An unsupported legacy endpoint falls back to v2 discovery;
+other discovery failures fail explicitly rather than claiming an incomplete list is complete.

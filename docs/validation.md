@@ -27,3 +27,31 @@ coverage; Ruff, Bandit and dependency auditing are clean. Initial GitHub CI pass
 Python 3.11–3.14. Its Gitleaks download failed with HTTP 504, so secret scanning uses
 PyPI's detect-secrets with online verification disabled. Scan reports contain only
 hashed candidates, and CI prints paths rather than candidate values.
+
+## Raspberry Pi 4 result (2026-11-08)
+
+Installed reviewed code revision `487ae1e662656f416fed95a61d761d08bee2fdc6` as a
+non-editable package in `/home/nikita/.local/share/mi-home-cli/venv`, with launcher
+`/home/nikita/.local/bin/mi-home-cli` and source checkout `/home/nikita/mi-home-cli`.
+System Python, services and containers were not changed. The runtime venv contains
+only the package, its runtime dependencies and pip; test tools ran in a separate
+temporary venv which was removed afterwards.
+
+On the Pi, all **88 tests passed in 1.82 seconds**. Installed version `0.1.0`, root
+help and every subcommand's help passed; `pip check` found no broken requirements.
+An isolated empty-state smoke check returned the expected login-required message.
+No real account state was read or written. The code revision above also passed all
+five GitHub CI jobs: Python 3.11, 3.12, 3.13, 3.14, and security.
+
+The remaining user step is interactive live authentication and discovery:
+
+```sh
+~/.local/bin/mi-home-cli login --region de
+~/.local/bin/mi-home-cli devices list --model zhimi.heater.mc2
+~/.local/bin/mi-home-cli devices show DEVICE_DID --region de --homey --reveal-token
+```
+
+If the heater is missing, use `devices list --region all --model zhimi.heater.mc2`.
+If QR login is rejected, try `login --method password --region de`. Enter credentials
+and verification answers only on the Pi. Do not upload QR/session/token output to PRs
+or paste it into an agent conversation. Report only success or the sanitized error.
