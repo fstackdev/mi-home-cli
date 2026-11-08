@@ -48,6 +48,13 @@ European QR login requires version 0.1.1 or later. Version 0.1.0 incorrectly rej
 the European account/polling hosts before displaying the QR; follow the update commands
 below if you encounter that error.
 
+Password login requires version 0.1.2 or later. Earlier versions could report an
+incorrect password during the initial challenge request, before submitting credentials.
+The email/SMS code must come from the CLI's own verification request; a code for a
+separate app login belongs to a different session. Some Xiaomi Home versions expose
+only a device-pairing scanner, which may reject account-login QR codes; use password
+login in that case.
+
 ## Find devices
 
 ```sh

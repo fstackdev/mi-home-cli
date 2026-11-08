@@ -9,9 +9,11 @@ import time
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urljoin, urlsplit
 
-from .errors import AuthenticationError, NetworkError, ProtocolError, RateLimitError
+import requests
+
+from .errors import AuthenticationError, MiHomeError, NetworkError, ProtocolError, RateLimitError
 from .storage import Store, write_private
-from .transport import AUTH_HOST, Transport, parse_json, trusted_url
+from .transport import ACCOUNT_HOSTS, AUTH_HOST, Transport, parse_json, trusted_url
 
 
 @dataclass(repr=False)
@@ -25,8 +27,8 @@ class Session:
         return {k: getattr(self, k) for k in ("user_id", "ssecurity", "service_token", "region")}
 
 
-def check_code(data: dict):
-    if data.get("code") == 70016:
+def check_code(data: dict, *, allow_challenge: bool = False):
+    if data.get("code") == 70016 and not allow_challenge:
         raise AuthenticationError(
             "Xiaomi rejected the account or password. Check it before retrying."
         )
@@ -139,6 +141,7 @@ class Authenticator:
         # Wire requirement, not a stored password hash. Send only in HTTPS form bodies.
         password_hash = hashlib.md5(password.encode(), usedforsecurity=False).hexdigest().upper()
         del password
+        phase = "preparing login"
         try:
             sign = None
             captcha = None
@@ -152,7 +155,9 @@ class Authenticator:
                     params=params,
                     cookies={"userId": username},
                 )
-                check_code(first)
+                # An unauthenticated serviceLogin normally returns 70016 WITH _sign.
+                # No password has been submitted at this stage; continue the challenge.
+                check_code(first, allow_challenge=True)
                 if first.get("captchaUrl"):
                     captcha = self._captcha(first["captchaUrl"])
                     continue
@@ -172,35 +177,67 @@ class Authenticator:
                 "_json": "true",
             }
             for _ in range(3):
+                phase = "submitting credentials"
                 result = self.http.json(
                     "POST", AUTH_HOST + "/pass/serviceLoginAuth2", data=fields, follow=False
                 )
-                check_code(result)
+                # Honor rate limits immediately, but inspect advertised challenges first.
+                check_code(result, allow_challenge=True)
                 if result.get("captchaUrl"):
                     fields["captCode"] = self._captcha(result["captchaUrl"])
                     if result.get("_sign"):
                         fields["_sign"] = result["_sign"]
                     continue
                 if result.get("notificationUrl"):
+                    phase = "identity verification"
                     return self._two_factor(result["notificationUrl"], region)
+                check_code(result)
+                phase = "exchanging cloud session"
                 return self._finish(result, region)
             raise AuthenticationError(
                 "CAPTCHA retry limit reached. Check password and retry later."
             )
+        except MiHomeError as error:
+            raise type(error)(f"Password login ({phase}): {error}") from None
         finally:
             # Only minimal cloud credentials are ever written by Store.save().
             del password_hash
 
+    def _cookie_for(self, name: str, url: str) -> str:
+        # Apply Requests' domain/path/expiry/secure rules to each candidate. A regional
+        # cookie takes precedence over a same-name parent-domain cookie for CSRF data.
+        prepared = requests.Request("GET", trusted_url(url)).prepare()
+        candidates = []
+        for cookie in self.http.session.cookies:
+            if cookie.name != name:
+                continue
+            jar = requests.cookies.RequestsCookieJar()
+            jar.set_cookie(cookie)
+            if requests.cookies.get_cookie_header(jar, prepared):
+                candidates.append(cookie)
+        if not candidates:
+            return ""
+        selected = max(candidates, key=lambda cookie: (len(cookie.domain), len(cookie.path)))
+        return selected.value or ""
+
     def _two_factor(self, notification: str, region: str) -> Session:
         notification = trusted_url(urljoin(AUTH_HOST, notification))
-        if urlsplit(notification).hostname != "account.xiaomi.com":
+        if urlsplit(notification).hostname not in ACCOUNT_HOSTS:
             raise ProtocolError("Unsupported Xiaomi identity verification host.")
-        self.http.request("GET", notification)
-        context = parse_qs(urlsplit(notification).query).get("context", [None])[0]
+        self.ui.message("Xiaomi requires additional verification; preparing email/SMS options.")
+        start = self.http.request("GET", notification)
+        destination = urlsplit(trusted_url(start.url or notification))
+        if destination.hostname not in ACCOUNT_HOSTS:
+            raise ProtocolError("Unsupported Xiaomi identity verification host.")
+        identity_host = f"https://{destination.hostname}"
+        context = (
+            parse_qs(destination.query).get("context", [None])[0]
+            or parse_qs(urlsplit(notification).query).get("context", [None])[0]
+        )
         if not context:
             raise AuthenticationError("Unsupported Xiaomi verification challenge. Use QR login.")
         common = {"sid": "xiaomiio", "context": context, "_locale": "en_US"}
-        choices = self.http.json("GET", AUTH_HOST + "/identity/list", params=common)
+        choices = self.http.json("GET", identity_host + "/identity/list", params=common)
         offered = choices.get("options", [])
         if not isinstance(offered, list):
             offered = []
@@ -216,11 +253,17 @@ class Authenticator:
                 raise AuthenticationError("Choose email or sms and run login again.")
             flag = 4 if choice == "sms" else 8
         channel = "Phone" if flag == 4 else "Email"
+        send_url = identity_host + f"/identity/auth/send{channel}Ticket"
         response = self.http.json(
             "POST",
-            AUTH_HOST + f"/identity/auth/send{channel}Ticket",
-            params=common,
-            data={"retry": "0", "icode": "", "_json": "true"},
+            send_url,
+            params=common | {"mask": "0", "_dc": str(int(time.time() * 1000))},
+            data={
+                "retry": "0",
+                "icode": "",
+                "_json": "true",
+                "ick": self._cookie_for("ick", send_url),
+            },
         )
         check_code(response)
         if response.get("code") != 0:
@@ -230,12 +273,19 @@ class Authenticator:
         self.ui.message("Xiaomi sent a verification code by " + ("SMS." if flag == 4 else "email."))
         for _ in range(3):
             code = self.ui.secret("2FA code: ")
+            verify_url = identity_host + f"/identity/auth/verify{channel}"
             verified_response = self.http.request(
                 "POST",
-                AUTH_HOST + f"/identity/auth/verify{channel}",
+                verify_url,
                 follow=False,
-                params=common,
-                data={"_flag": str(flag), "ticket": code, "trust": "false", "_json": "true"},
+                params=common | {"mask": "0", "_flag": str(flag), "_json": "true"},
+                data={
+                    "_flag": str(flag),
+                    "ticket": code,
+                    "trust": "false",
+                    "_json": "true",
+                    "ick": self._cookie_for("ick", verify_url),
+                },
             )
             try:
                 verified = parse_json(verified_response.text)
@@ -254,19 +304,22 @@ class Authenticator:
                     "Xiaomi rejected verification. Use QR login or retry later."
                 )
             location = verified.get("location") or verified_response.headers.get("Location")
+            base_url = verified_response.url or verify_url
             if not location:
                 response = self.http.request(
-                    "GET", AUTH_HOST + "/identity/result/check", params=common, follow=False
+                    "GET", identity_host + "/identity/result/check", params=common, follow=False
                 )
                 location = response.headers.get("Location")
+                base_url = response.url or identity_host
             security = None
             user_id = None
             # Inspect every redirect to retain extension-pragma with ssecurity.
             for _ in range(8):
                 if not location:
                     break
-                location = trusted_url(urljoin(AUTH_HOST, location))
+                location = trusted_url(urljoin(base_url, location))
                 response = self.http.request("GET", location, follow=False)
+                base_url = response.url or location
                 extension = response.headers.get("extension-pragma")
                 if extension:
                     extra = parse_json(extension)
