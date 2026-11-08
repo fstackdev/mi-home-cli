@@ -21,6 +21,12 @@ from .conftest import SERVICE, FakeHTTP, response
         "https://account.xiaomi.com:invalid",
         "/relative",
         None,
+        "http://eu.account.xiaomi.com/login",
+        "http://eu.lp.account.xiaomi.com/poll",
+        "https://eu.account.xiaomi.com.evil.invalid/login",
+        "https://eu.lp.account.xiaomi.com.evil.invalid/poll",
+        "https://unlisted.account.xiaomi.com/login",
+        "https://evileu.account.xiaomi.com/login",
     ],
 )
 def test_untrusted_destinations(url):
@@ -49,6 +55,25 @@ def test_safe_relative_redirect():
     http = FakeHTTP(response(status=302, headers={"Location": "/next"}), response({"ok": True}))
     assert http.json("GET", "https://account.xiaomi.com/test")["ok"]
     assert http.calls[-1][1] == "https://account.xiaomi.com/next"
+
+
+@pytest.mark.parametrize(
+    "host", ["account.xiaomi.com", "eu.account.xiaomi.com", "eu.lp.account.xiaomi.com"]
+)
+def test_known_xiaomi_account_hosts_allowed(host):
+    url = f"https://{host}/login?ticket=private"
+    assert trusted_url(url) == url
+
+
+def test_european_redirect_still_verifies_tls_and_drops_explicit_cookies():
+    http = FakeHTTP(
+        response(status=302, headers={"Location": "https://eu.account.xiaomi.com/login"}),
+        response({"ok": True}),
+    )
+    assert http.json("GET", "https://account.xiaomi.com/test", cookies={"ticket": SERVICE})["ok"]
+    assert http.calls[-1][1] == "https://eu.account.xiaomi.com/login"
+    assert "cookies" not in http.calls[-1][2]
+    assert all(call[2]["verify"] is True for call in http.calls)
 
 
 @pytest.mark.parametrize(

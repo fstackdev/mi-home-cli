@@ -1,5 +1,20 @@
 # Validation
 
+## 0.1.1: European QR login host fix
+
+The first real user attempt with 0.1.0 failed before showing a QR because the URL
+allowlist omitted Xiaomi's European account and polling hosts. A credential-free
+bootstrap request from Pi4 over verified HTTPS confirmed `eu.account.xiaomi.com`
+for `loginUrl` and `eu.lp.account.xiaomi.com` for `lp`. Only hostname/scheme and
+structural booleans were collected; QR tickets, full URLs and cookies were not logged.
+
+0.1.1 permits these two exact destinations. Arbitrary subdomains, lookalike domains,
+HTTP, URL userinfo, fragments and nonstandard ports remain rejected. Added regressions
+cover the European QR flow, TLS-preserving redirects, dropping explicitly supplied
+cookies across redirects, and rejection before QR rendering/polling for unlisted hosts.
+All 101 offline tests, Ruff and Bandit pass locally. Full authenticated login and device
+retrieval still require the user's own interactive Pi session.
+
 This document records reproducible checks. No real Xiaomi credentials, device records
 or session data are included in this repository or its CI.
 

@@ -4,7 +4,7 @@ import pytest
 import requests
 
 from mi_home_cli.auth import Authenticator
-from mi_home_cli.errors import AuthenticationError, RateLimitError
+from mi_home_cli.errors import AuthenticationError, ProtocolError, RateLimitError
 
 from .conftest import SECURITY, SERVICE, UI, FakeHTTP, response
 
@@ -37,6 +37,47 @@ def test_qr_success_without_persisting_pass_token(store):
     assert session.service_token == SERVICE
     assert "not-persisted" not in (store.path / "session.json").read_text()
     assert SERVICE not in repr(session)
+
+
+def test_european_qr_bootstrap_and_polling(store):
+    # Hostnames observed on Pi4; ticket values here are synthetic and never real.
+    poll_url = "https://eu.lp.account.xiaomi.com/longPolling/lp?ticket=private"
+    http = FakeHTTP(
+        response(
+            {
+                "loginUrl": "https://eu.account.xiaomi.com/longPolling/login?ticket=private",
+                "lp": poll_url,
+                "timeout": 30,
+            }
+        ),
+        response(completion()),
+        response(cookies={"serviceToken": SERVICE}),
+    )
+    ui = UI()
+    session = Authenticator(http, store, ui).qr("de")
+    assert ui.qr_seen
+    assert session.service_token == SERVICE
+    assert http.calls[1][1] == poll_url
+    assert all(call[2]["verify"] is True for call in http.calls)
+    assert ui.messages == []
+    assert not (store.path / "session.json").exists()
+
+
+@pytest.mark.parametrize("field", ["loginUrl", "lp"])
+def test_qr_unlisted_host_rejected_before_render_or_poll(store, field):
+    bootstrap = {
+        "loginUrl": "https://eu.account.xiaomi.com/longPolling/login?ticket=private",
+        "lp": "https://eu.lp.account.xiaomi.com/longPolling/lp?ticket=private",
+        "timeout": 30,
+    }
+    bootstrap[field] = "https://unlisted.account.xiaomi.com/should-not-run?ticket=private"
+    http = FakeHTTP(response(bootstrap))
+    ui = UI()
+    with pytest.raises(ProtocolError) as caught:
+        Authenticator(http, store, ui).qr("de")
+    assert not ui.qr_seen
+    assert len(http.calls) == 1
+    assert "ticket=private" not in str(caught.value)
 
 
 def test_qr_timeout_is_bounded(store, monkeypatch):

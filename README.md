@@ -44,6 +44,10 @@ resolve the account challenge in Xiaomi's own app. Each challenge allows at most
 submissions, each login is locked against concurrent attempts, and attempts have a
 30-second cooldown. QR polling is capped at 180 seconds / 36 requests.
 
+European QR login requires version 0.1.1 or later. Version 0.1.0 incorrectly rejected
+the European account/polling hosts before displaying the QR; follow the update commands
+below if you encounter that error.
+
 ## Find devices
 
 ```sh
