@@ -1,6 +1,7 @@
 import base64
 import json
 from collections import deque
+from urllib.parse import urlsplit
 
 import pytest
 import requests
@@ -38,8 +39,11 @@ class FakeHTTP(Transport):
         item = self.responses.popleft()
         if isinstance(item, Exception):
             raise item
+        item.url = url
         for cookie in item.cookies:
-            self.session.cookies.set(cookie.name, cookie.value, domain=".sts.api.io.mi.com")
+            self.session.cookies.set(
+                cookie.name, cookie.value, domain=cookie.domain or urlsplit(url).hostname
+            )
         return item
 
 

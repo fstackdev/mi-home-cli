@@ -1,5 +1,27 @@
 # Validation
 
+## 0.1.2: Password bootstrap and regional identity verification
+
+Reproduced the reported password error on Pi4 without any account credentials:
+`/pass/serviceLogin` returns `code=70016` together with a nonempty `_sign`. This is a
+normal unauthenticated bootstrap challenge, but versions 0.1.0/0.1.1 treated it as an
+incorrect password and stopped before submitting credentials. 0.1.2 accepts that
+challenge only while inspecting bootstrap/CAPTCHA/verification responses. A real
+credential rejection after submission and all rate limits remain terminal.
+
+Identity verification now accepts the existing exact global/European account hosts,
+follows the final identity origin for list/send/verify requests, resolves relative
+finish redirects against the preceding hop, and includes the upstream `mask`, flag
+and scoped `ick` CSRF fields. Cookie selection delegates host/path/expiry rules to
+Requests and prefers regional cookies over same-name parent-domain cookies. Errors
+identify the login phase without dumping responses or credentials.
+
+110 offline tests pass locally (90% statement coverage), including realistic 70016
+bootstrap fixtures, actual post-submission rejection, rate limits, global-to-European
+identity redirects, email/SMS flows, rotating CSRF cookies and cookie scope. Ruff and
+Bandit pass. Live credential submission and receipt/verification of an email code are
+still user-operated steps and have not been tested with the user's account.
+
 ## 0.1.1: European QR login host fix
 
 The first real user attempt with 0.1.0 failed before showing a QR because the URL

@@ -10,15 +10,21 @@ from .errors import AuthenticationError, NetworkError, ProtocolError, RateLimitE
 
 REGIONS = ("cn", "de", "us", "ru", "tw", "sg", "in", "i2")
 AUTH_HOST = "https://account.xiaomi.com"
-HOSTS = {
+ACCOUNT_HOSTS = {
     "account.xiaomi.com",
-    # Regional destinations returned by Xiaomi's verified-HTTPS QR bootstrap.
-    # Keep exact hosts rather than trusting arbitrary *.xiaomi.com destinations.
     "eu.account.xiaomi.com",
-    "eu.lp.account.xiaomi.com",
-    "sts.api.io.mi.com",
-    "api.io.mi.com",
-} | {f"{region}.api.io.mi.com" for region in REGIONS if region != "cn"}
+}
+# Regional destinations returned by Xiaomi's verified-HTTPS QR bootstrap.
+# Keep exact hosts rather than trusting arbitrary *.xiaomi.com destinations.
+HOSTS = (
+    ACCOUNT_HOSTS
+    | {
+        "eu.lp.account.xiaomi.com",
+        "sts.api.io.mi.com",
+        "api.io.mi.com",
+    }
+    | {f"{region}.api.io.mi.com" for region in REGIONS if region != "cn"}
+)
 
 
 def trusted_url(url: str) -> str:

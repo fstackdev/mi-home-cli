@@ -99,8 +99,8 @@ def test_qr_timeout_is_bounded(store, monkeypatch):
 
 def test_password_captcha_then_success(store):
     http = FakeHTTP(
-        response({"_sign": "test-sign"}),
-        response({"captchaUrl": "/captcha/image"}),
+        response({"code": 70016, "_sign": "test-sign"}),
+        response({"code": 70016, "captchaUrl": "/captcha/image"}),
         response(text="fake-png"),
         response(completion()),
         response(cookies={"serviceToken": SERVICE}),
@@ -136,7 +136,7 @@ def test_rejection_not_automatically_retried(store, data):
 )
 def test_full_2fa_redirect_chain(store, flag, selection, channel):
     http = FakeHTTP(
-        response({"_sign": "sign"}),
+        response({"code": 70016, "_sign": "sign"}),
         response(
             {"notificationUrl": "https://account.xiaomi.com/identity/authStart?context=private"}
         ),
@@ -189,3 +189,113 @@ def test_no_service_token_is_not_success(store):
     http = FakeHTTP(response())
     with pytest.raises(AuthenticationError, match="service token"):
         Authenticator(http, store, UI())._finish(completion(), "de")
+
+
+def test_70016_bootstrap_challenge_is_not_a_failed_password(store):
+    http = FakeHTTP(
+        response({"code": 70016, "_sign": "test-sign", "captchaUrl": None}),
+        response(completion()),
+        response(cookies={"serviceToken": SERVICE}),
+    )
+    session = Authenticator(http, store, UI("account", "fake-password")).password("de")
+    assert session.service_token == SERVICE
+    assert [call[0] for call in http.calls] == ["GET", "POST", "GET"]
+
+
+@pytest.mark.parametrize("code", [70022, 20023])
+def test_bootstrap_rate_limit_is_not_ignored_even_with_sign(store, code):
+    http = FakeHTTP(response({"code": code, "_sign": "test-sign"}))
+    with pytest.raises(RateLimitError, match="preparing login"):
+        Authenticator(http, store, UI("account", "fake-password")).password("de")
+    assert len(http.calls) == 1
+
+
+def test_bootstrap_missing_sign_reports_phase_without_blame_or_secrets(store):
+    http = FakeHTTP(response({"code": 70016, "description": SERVICE}))
+    with pytest.raises(AuthenticationError, match="preparing login") as caught:
+        Authenticator(http, store, UI("account", "fake-password")).password("de")
+    assert "rejected the account or password" not in str(caught.value)
+    assert SERVICE not in str(caught.value)
+    assert len(http.calls) == 1
+
+
+@pytest.mark.parametrize("regional_redirect", [False, True])
+def test_regional_email_verification_retains_origin_context_and_cookies(
+    store, regional_redirect, caplog
+):
+    origin = "https://eu.account.xiaomi.com"
+    notification = origin + "/identity/authStart?context=private"
+    steps = [response({"code": 70016, "_sign": "test-sign"})]
+    if regional_redirect:
+        notification = "https://account.xiaomi.com/identity/authStart?context=private"
+    steps.append(response({"notificationUrl": notification}))
+    if regional_redirect:
+        steps.append(
+            response(
+                status=302, headers={"Location": origin + "/identity/authStart?context=private"}
+            )
+        )
+    steps.extend(
+        [
+            response(cookies={"ick": "first-test-cookie"}),
+            response({"options": [8]}),
+            response({"code": 0}, cookies={"ick": "next-test-cookie"}),
+            response({"code": 0, "location": "/identity/result/check"}),
+            response(status=302, headers={"Location": "/pass/serviceLoginAuth2/end"}),
+            response(
+                status=302,
+                headers={
+                    "extension-pragma": json.dumps({"ssecurity": SECURITY}),
+                    "Location": "https://sts.api.io.mi.com/sts",
+                },
+                cookies={"userId": "test-user"},
+            ),
+            response(cookies={"serviceToken": SERVICE}),
+        ]
+    )
+    http = FakeHTTP(*steps)
+    ui = UI("account", "fake-password", "test-email-code")
+    session = Authenticator(http, store, ui).password("de")
+    assert session.user_id == "test-user"
+    assert session.service_token == SERVICE
+    send = next(call for call in http.calls if call[1].endswith("sendEmailTicket"))
+    verify = next(call for call in http.calls if call[1].endswith("verifyEmail"))
+    assert send[1].startswith(origin)
+    assert verify[1].startswith(origin)
+    assert send[2]["data"]["ick"] == "first-test-cookie"
+    assert verify[2]["data"]["ick"] == "next-test-cookie"
+    assert verify[2]["data"]["ticket"] == "test-email-code"
+    assert send[2]["params"]["mask"] == verify[2]["params"]["mask"] == "0"
+    assert verify[2]["params"]["_flag"] == "8"
+    assert verify[2]["params"]["context"] == "private"
+    assert all(call[2]["verify"] is True for call in http.calls)
+    assert "test-email-code" not in str(ui.messages) + caplog.text
+    assert SERVICE not in str(ui.messages) + caplog.text
+
+
+@pytest.mark.parametrize("host", ["eu.lp.account.xiaomi.com", "sts.api.io.mi.com"])
+def test_non_identity_host_cannot_start_verification(store, host):
+    http = FakeHTTP()
+    with pytest.raises(ProtocolError):
+        Authenticator(http, store, UI())._two_factor(
+            f"https://{host}/identity/authStart?context=private", "de"
+        )
+    assert not http.calls
+
+
+def test_csrf_cookie_respects_host_and_path(store):
+    http = FakeHTTP()
+    http.session.cookies.set(
+        "ick", "regional-cookie", domain="eu.account.xiaomi.com", path="/identity"
+    )
+    http.session.cookies.set("ick", "global-cookie", domain="account.xiaomi.com", path="/identity")
+    auth = Authenticator(http, store, UI())
+    assert (
+        auth._cookie_for("ick", "https://eu.account.xiaomi.com/identity/auth/verifyEmail")
+        == "regional-cookie"
+    )
+    assert (
+        auth._cookie_for("ick", "https://account.xiaomi.com/identity/auth/verifyEmail")
+        == "global-cookie"
+    )
+    assert auth._cookie_for("ick", "https://eu.account.xiaomi.com/pass/serviceLogin") == ""
